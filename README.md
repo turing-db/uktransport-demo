@@ -15,11 +15,12 @@ turingdb start -demon
 python3 build_uk_transport_graph.py
 
 git clone https://github.com/turing-db/turingdb-ui-kit ~/turingdb-ui-kit
-node ~/turingdb-ui-kit/tools/kit.mjs sync samples/uktransport
-node ~/turingdb-ui-kit/tools/kit.mjs dev samples/uktransport
+./run.sh
 # http://127.0.0.1:8099/?m=uktransport
 ```
 
-`kit.json` names the graph and the ports: `ui` for the app, `api` for TuringDB. `kit sync`
-rebuilds `app/` (gitignored) from the pinned visualizer and the modules: the page in
-`modules/uktransport/` and `modules/geo-network/`, the dense network layer it draws with.
+`kit.json` names the graph and the ports: `ui` for the app, `api` for TuringDB. `run.sh` runs
+`kit sync`, which rebuilds `app/` (gitignored) from the pinned visualizer and the modules: the page
+in `modules/uktransport/` and `modules/geo-network/`, the dense network layer it draws with. Then
+it serves the app on localhost, or with `./run.sh --tailscale` on this machine's tailscale
+address; `UI_PORT`, `API_PORT`, `KIT` and `SYNC=0` override the defaults.
