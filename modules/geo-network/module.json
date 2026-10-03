@@ -5,13 +5,41 @@
   "category": "surface",
   "kind": "react",
   "status": "experimental",
-  "summary": "A country-sized network (hundreds of thousands of nodes and segments) drawn as one base layer of a GeoMap: built once from typed arrays into a few GeoJSON features per category, width by weight bucket, categories toggled by visibility, dimmed under overlays, picked through a grid index instead of per-node features; plus GeoPathFlow, comets travelling along every overlay path.",
+  "summary": "A country-sized network (hundreds of thousands of nodes and segments) drawn as one base layer of a GeoMap: built once from typed arrays into a few GeoJSON features per category, width by weight bucket, categories toggled by visibility, dimmed under overlays, picked through a grid index instead of per-node features; plus GeoPathFlow, comets travelling along every overlay path, and PlaceLabels, the basemap's place names restyled from the theme and lifted above the network so they stay readable.",
   "entry": "index.tsx",
-  "requires": ["geo-map", "overlay", "theme", "ui"],
-  "npm": { "maplibre-gl": "^5.24.0" },
-  "useWhen": ["the base network is too big for GeoSurface (more than ~10k nodes or segments): a national transport, road, grid or telecom network", "segments fall into categories to toggle (mode, voltage, operator) and carry a weight (routes, capacity)", "a route should visibly travel along the map (GeoPathFlow)"],
-  "avoidWhen": ["a few thousand nodes: GeoSurface draws and labels them itself", "per-segment clicks: segments are merged into one feature per category and bucket"],
-  "exports": ["GeoNetwork", "GeoPathFlow", "PointGrid", "lineCollections", "pointCollections", "countByCategory", "weightBucket", "bucketWidth", "WEIGHT_BUCKETS", "NO_CATEGORY", "polylineLengths", "alongPolyline"],
+  "requires": [
+    "geo-map",
+    "overlay",
+    "theme",
+    "ui"
+  ],
+  "npm": {
+    "maplibre-gl": "^5.24.0"
+  },
+  "useWhen": [
+    "the base network is too big for GeoSurface (more than ~10k nodes or segments): a national transport, road, grid or telecom network",
+    "segments fall into categories to toggle (mode, voltage, operator) and carry a weight (routes, capacity)",
+    "a route should visibly travel along the map (GeoPathFlow)"
+  ],
+  "avoidWhen": [
+    "a few thousand nodes: GeoSurface draws and labels them itself",
+    "per-segment clicks: segments are merged into one feature per category and bucket"
+  ],
+  "exports": [
+    "GeoNetwork",
+    "GeoPathFlow",
+    "PlaceLabels",
+    "PointGrid",
+    "lineCollections",
+    "pointCollections",
+    "countByCategory",
+    "weightBucket",
+    "bucketWidth",
+    "WEIGHT_BUCKETS",
+    "NO_CATEGORY",
+    "polylineLengths",
+    "alongPolyline"
+  ],
   "provenance": [
     {
       "repo": "turing-db/turingdb",

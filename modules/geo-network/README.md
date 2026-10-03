@@ -16,6 +16,7 @@ const CATEGORIES: NetworkCategory[] = [
   <GeoNetwork network={network} categories={CATEGORIES} visible={shown} keyOf={(i) => ids[i]} yieldTo={['kit-nodes']} onHover={setHover} />
   <GeoSurface nodes={overlayNodes} toKey={String} />
   <GeoPathFlow resolve={(k) => position(k)} />
+  <PlaceLabels />
 </GeoMap>
 ```
 
@@ -26,6 +27,9 @@ per segment. Toggling `visible` changes layout visibility and an overlay with `d
 opacity; neither re-sends data to MapLibre's worker. A click picks the nearest drawn point within
 `pickRadius` px through `PointGrid` and publishes it with `store.pick(key, 'map')`, like `GeoSurface`.
 `GeoPathFlow` animates comets along every overlay `paths` entry, coloured by the path's tone.
+`PlaceLabels` restyles the basemap's place names (OpenMapTiles `place` layer) from the theme: cities
+bold and brightest, towns, then villages, with a solid halo, moved above every other layer. Mount it
+last so it lands on top.
 
 **Gotchas:** the network sits under the basemap's top labels (`underLabels`); a node is pickable only
 at zooms where its category draws points (`pointMinzoom`). Keys passed to `keyOf` follow the demo's

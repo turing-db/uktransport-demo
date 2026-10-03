@@ -8,7 +8,7 @@ import { kitClientBase } from '@kit-host'
 import { AssistantPanel, captureSchema, useAssistantSettings, useGraphAgent, type GraphSchema } from '@kit/assistant'
 import type { Capabilities } from '@kit/cypher'
 import { BASEMAPS, GeoMap, GeoSurface, type GeoNode, type LngLat } from '@kit/geo-map'
-import { GeoNetwork, GeoPathFlow, NO_CATEGORY, type NetworkHover } from '@kit/geo-network'
+import { GeoNetwork, GeoPathFlow, NO_CATEGORY, PlaceLabels, type NetworkHover } from '@kit/geo-network'
 import { compose, keysOf, overlays, type NodeKey } from '@kit/overlay'
 import { PresetPanel } from '@kit/preset-panel'
 import { createClient } from '@kit/tdb-client'
@@ -142,6 +142,7 @@ function TransportMap() {
         {t && <GeoNetwork network={t.network} categories={MODES} visible={visible} keyOf={(i) => String(t.ids[i])} yieldTo={['kit-nodes']} onHover={(h) => hover.current(h)} />}
         {t && <GeoSurface nodes={overlayNodes} labels="overlay" radius={2.6} maxZoom={14} />}
         {t && <GeoPathFlow resolve={position} />}
+        <PlaceLabels />
       </GeoMap>
 
       {t && <HoverTip register={hover} transport={t} names={names} />}
