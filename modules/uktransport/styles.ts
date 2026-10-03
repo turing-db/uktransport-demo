@@ -38,6 +38,15 @@ export const UKT_CSS = `
 .ukt-leg { border-left: 3px solid; padding: 2px 0 2px 10px; }
 .ukt-leg[data-walk="true"] { border-left-style: dotted; }
 .ukt-leg-head { display: flex; align-items: center; gap: 6px; font-weight: 600; font-size: 12px; }
-.ukt-leg-body { font-size: 12px; color: var(--tk-text); margin-top: 2px; }
-.ukt-leg-body b { color: var(--tk-text-strong); font-weight: 500; }
+.ukt-leg-service { margin-top: 2px; }
+.ukt-stops { display: flex; flex-direction: column; margin-top: 6px; }
+.ukt-stop { display: grid; grid-template-columns: 12px 1fr auto; align-items: center; gap: 8px; padding: 2px 4px 2px 0; border: 0;
+  background: none; color: var(--tk-text); font: inherit; font-size: 12px; text-align: left; cursor: pointer; border-radius: 4px; }
+.ukt-stop:hover { background: var(--tk-card); }
+.ukt-stop i { width: 8px; height: 8px; margin-left: 2px; border-radius: 50%; border: 2px solid; background: var(--tk-panel); box-sizing: border-box; }
+.ukt-stop[data-role="end"] { color: var(--tk-text-strong); font-weight: 600; }
+.ukt-stop[data-role="end"] i { width: 11px; height: 11px; margin-left: 0; }
+.ukt-stop small { color: var(--tk-text-mute); font-weight: 400; }
+.ukt-stop .tk-num { color: var(--tk-text-mute); font-weight: 400; }
+.ukt-more span { color: var(--tk-link); }
 `

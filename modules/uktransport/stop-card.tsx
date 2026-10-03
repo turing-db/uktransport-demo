@@ -4,9 +4,11 @@ import type { TuringClient } from '@kit/tdb-client'
 import { Button, Chip, CypherBlock, Dot, ErrorCard, KV, Loading, Row } from '@kit/ui'
 import { modeColor, modeLabel } from './config'
 import type { Endpoint } from './journey'
-import { loadStop, routeOverlay, stopRoutesOverlay, type RouteRow } from './routes'
+import { loadStop, routeOverlay, stopRoutesOverlay, type RouteRow, type StopInfo } from './routes'
 
 const ROUTES_SHOWN = 40
+
+const endpointOf = (info: StopInfo): Endpoint => ({ label: info.locality && !info.name.includes(info.locality) ? `${info.name}, ${info.locality}` : info.name, atco: info.atco })
 
 export function StopCard(p: { db: TuringClient; id: number; autoRoutes: boolean; nameOf: (atco: string) => string; nameOfId: (id: number) => string; onClose: () => void; onLoaded: (e: Endpoint | null) => void; onPlan: (which: 'from' | 'to', e: Endpoint) => void }) {
   const [data, setData] = useState<Awaited<ReturnType<typeof loadStop>> | null>(null)
@@ -23,7 +25,7 @@ export function StopCard(p: { db: TuringClient; id: number; autoRoutes: boolean;
     loadStop(p.db, p.id).then((d) => {
       if (dead) return
       setData(d)
-      p.onLoaded({ label: d.info.name, atco: d.info.atco })
+      p.onLoaded(endpointOf(d.info))
       if (p.autoRoutes && d.routes.length) stopRoutesOverlay(p.db, d.info).then((r) => !dead && overlays.show(r.overlay), (e) => !dead && setErr(e))
     }, (e) => !dead && setErr(e))
     return () => { dead = true }
@@ -43,7 +45,7 @@ export function StopCard(p: { db: TuringClient; id: number; autoRoutes: boolean;
   const terminus = (code: string | null) => (code ? data?.termini.get(code) ?? p.nameOf(code) : '?')
   const modes = data ? [...new Set(data.routes.map((r) => r.mode))] : []
   const shown = data ? (all ? data.routes : data.routes.slice(0, ROUTES_SHOWN)) : []
-  const endpoint = data ? { label: data.info.name, atco: data.info.atco } : null
+  const endpoint = data ? endpointOf(data.info) : null
   return (
     <div className="tk tk-infocard ukt-card">
       <button type="button" className="tk-x" aria-label="Close" onClick={p.onClose}>×</button>
