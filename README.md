@@ -1,8 +1,8 @@
 # UK public transport
 
-The `uktransport` graph is built by `samples/uktransport/build_uk_transport_graph.py` in
-[turingdb](https://github.com/turing-db/turingdb), from the NaPTAN, Bus Open Data Service and
-National Rail CSV files next to it.
+`fetch_uk_transport.py` downloads NaPTAN, the Bus Open Data Service GTFS timetables and the
+National Rail feeds into the CSV files under `data/`. `build_uk_transport_graph.py` turns them into
+the `uktransport` graph in a running TuringDB server through `LOAD PARQUET`.
 
 The map app is a TypeScript page built from the
 [turingdb-ui-kit](https://github.com/turing-db/turingdb-ui-kit) on the turingdb-visualizer. It
@@ -12,7 +12,7 @@ graph assistant.
 
 ```bash
 turingdb start -demon
-python3 ~/turingdb/samples/uktransport/build_uk_transport_graph.py
+python3 build_uk_transport_graph.py
 
 git clone https://github.com/turing-db/turingdb-ui-kit ~/turingdb-ui-kit
 ./run.sh
