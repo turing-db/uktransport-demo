@@ -6,6 +6,16 @@ import type { Overlay, OverlayEdge } from '@kit/overlay'
 import type { TuringClient } from '@kit/tdb-client'
 import { modeById, modeColor } from './config'
 
+export interface Service {
+  routeId: number
+  mode: string
+  line: string | null
+  operator: string | null
+  /** Name of the route's last stop. */
+  towards: string | null
+  services: number | null
+}
+
 export interface StopInfo {
   id: number
   name: string
@@ -125,15 +135,41 @@ export async function stopRoutesOverlay(db: TuringClient, stop: StopInfo): Promi
 }
 
 export async function routeOverlay(db: TuringClient, route: RouteRow, names: (id: number) => string): Promise<{ overlay: Overlay; query: string }> {
-  const query = `MATCH (r:Route)-[c:CALLS_AT]->(t:Stop) WHERE ${seekNodes('r', [route.id])} RETURN r, r.mode, c.sequence, t ORDER BY c.sequence`
+  return routeOverlayWhere(db, seekNodes('r', [route.id]), route.line ?? route.mode, names)
+}
+
+export async function serviceOverlay(db: TuringClient, service: Service, names: (id: number) => string): Promise<{ overlay: Overlay; query: string }> {
+  return routeOverlayWhere(db, `r.route_id = ${service.routeId}`, service.line ?? service.mode, names)
+}
+
+async function routeOverlayWhere(db: TuringClient, where: string, label: string, names: (id: number) => string): Promise<{ overlay: Overlay; query: string }> {
+  const query = `MATCH (r:Route)-[c:CALLS_AT]->(t:Stop) WHERE ${where} RETURN r, r.mode, c.sequence, t ORDER BY c.sequence`
   const r = await db.query(query)
   const stops = r.column<number>(3)
   const ends = [stops[0], stops[stops.length - 1]].filter((x) => x !== undefined).map(String)
-  const overlay = routesOverlay('route', `${route.line ?? route.mode} · ${names(stops[0])} → ${names(stops[stops.length - 1])}`, {
+  const overlay = routesOverlay('route', `${label} · ${names(stops[0])} → ${names(stops[stops.length - 1])}`, {
     route: r.column<number>(0), mode: r.column<string>(1), sequence: r.column<number>(2), stop: stops,
   }, { nodes: ends.map((id) => ({ id, tone: 'focus' as const, label: names(Number(id)) })), labels: ends })
   overlay.edges = overlay.edges?.map((e) => ({ ...e, width: 0.3 }))
   return { overlay, query }
+}
+
+export interface SegmentRoute { service: Service | null; routeId: number; minutes: number | null }
+
+export interface SegmentInfo { from: { id: number; name: string }; to: { id: number; name: string }; routes: SegmentRoute[]; query: string }
+
+/** Every route with a NEXT edge from one stop to the other, with its minutes. */
+export async function loadSegment(db: TuringClient, from: number, to: number): Promise<SegmentInfo> {
+  const query = `MATCH (a:Stop)-[e:NEXT]->(b:Stop) WHERE ${seekNodes('a', [from])} AND b = ${to} RETURN a.name, b.name, e.route_id, e.minutes`
+  const r = await db.query(query)
+  const [first] = r.tuples()
+  const routeIds = [...new Set(r.column<number>(2).map(Number))]
+  const services = await loadServices(db, routeIds)
+  const minutes = new Map<number, number | null>()
+  r.tuples().forEach(([, , routeId, m]) => minutes.set(Number(routeId), m == null ? null : Number(m)))
+  const routes = routeIds.map((routeId) => ({ routeId, service: services.get(routeId) ?? null, minutes: minutes.get(routeId) ?? null }))
+  routes.sort((x, y) => (y.service?.services ?? 0) - (x.service?.services ?? 0))
+  return { from: { id: from, name: String(first?.[0] ?? from) }, to: { id: to, name: String(first?.[1] ?? to) }, routes, query }
 }
 
 export interface OperatorRow { id: number; name: string; code: string; routes: number; modes: Map<string, number> }
@@ -161,4 +197,35 @@ export async function operatorOverlay(db: TuringClient, op: OperatorRow): Promis
     route: r.column<number>(0), mode: r.column<string>(1), sequence: r.column<number>(2), stop: r.column<number>(3),
   })
   return { overlay, query, stops }
+}
+
+/** Line, operator, direction and trips of each route, by route_id. */
+export async function loadServices(db: TuringClient, routeIds: number[]): Promise<Map<number, Service>> {
+  const out = new Map<number, Service>()
+  const destinations = new Map<number, string>()
+  for (const chunk of chunked(routeIds, 200)) {
+    const where = orChain('r.route_id', chunk)
+    const [routes, operators] = await Promise.all([
+      db.query(`MATCH (r:Route) WHERE ${where} RETURN r.route_id, r.mode, r.line, r.destination, r.services`),
+      db.query(`MATCH (o:Operator)-[:RUNS]->(r:Route) WHERE ${where} RETURN r.route_id, o.name`),
+    ])
+    const operator = new Map(operators.tuples().map((t) => [Number(t[0]), String(t[1])]))
+    for (const [id, mode, line, destination, services] of routes.tuples()) {
+      const routeId = Number(id)
+      out.set(routeId, { routeId, mode: String(mode ?? ''), line: line == null ? null : String(line), operator: operator.get(routeId) ?? null, towards: null, services: services == null ? null : Number(services) })
+      if (destination != null) destinations.set(routeId, String(destination))
+    }
+  }
+
+  const codes = [...new Set(destinations.values())]
+  const names = new Map<string, string>()
+  for (const chunk of chunked(codes, 200)) {
+    const r = await db.query(`MATCH (s:Stop) WHERE ${orChain('s.atco_code', chunk)} RETURN s.atco_code, s.name`)
+    r.tuples().forEach(([code, name]) => names.set(String(code), String(name)))
+  }
+  for (const [routeId, code] of destinations) {
+    const service = out.get(routeId)
+    if (service) service.towards = names.get(code) ?? code
+  }
+  return out
 }

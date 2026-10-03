@@ -89,6 +89,56 @@ export function countByCategory(categories: Uint8Array, categoryCount: number): 
   return out
 }
 
+/** A uniform lng/lat grid over the segments, each listed in every cell its
+ *  line crosses, so a click finds the few segments near it. */
+export class SegmentGrid {
+  private readonly cells = new Map<number, number[]>()
+
+  constructor(net: DenseNetwork, private readonly cellDegrees = 0.05) {
+    for (let e = 0; e < net.src.length; e++) {
+      const a = net.src[e], b = net.tgt[e]
+      const x0 = net.lng[a], y0 = net.lat[a], x1 = net.lng[b], y1 = net.lat[b]
+      const steps = Math.ceil((2 * Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0))) / cellDegrees) + 1
+      let previous = -1
+      for (let s = 0; s <= steps; s++) {
+        const key = this.cellKey(x0 + ((x1 - x0) * s) / steps, y0 + ((y1 - y0) * s) / steps)
+        if (key === previous) continue
+        previous = key
+        const list = this.cells.get(key)
+        if (list) {
+          if (list[list.length - 1] !== e) list.push(e)
+        } else {
+          this.cells.set(key, [e])
+        }
+      }
+    }
+  }
+
+  /** Segments listed in the cells of a lng/lat box. */
+  near(lng0: number, lat0: number, lng1: number, lat1: number): Set<number> {
+    const out = new Set<number>()
+    const size = this.cellDegrees
+    for (let x = Math.floor((lng0 + 180) / size); x <= Math.floor((lng1 + 180) / size); x++) {
+      for (let y = Math.floor((lat0 + 90) / size); y <= Math.floor((lat1 + 90) / size); y++) {
+        for (const e of this.cells.get(x * 100_000 + y) ?? []) out.add(e)
+      }
+    }
+    return out
+  }
+
+  private cellKey(lng: number, lat: number) {
+    return Math.floor((lng + 180) / this.cellDegrees) * 100_000 + Math.floor((lat + 90) / this.cellDegrees)
+  }
+}
+
+/** Distance in px from point p to the segment a-b. */
+export function distanceToSegment(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
+  const dx = bx - ax, dy = by - ay
+  const length2 = dx * dx + dy * dy
+  const t = length2 > 0 ? Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / length2)) : 0
+  return Math.hypot(px - (ax + t * dx), py - (ay + t * dy))
+}
+
 /** A uniform lng/lat grid over the drawable nodes, for "which node is under the
  *  cursor" without one map feature per node. Cells hold node indexes in CSR form. */
 export class PointGrid {

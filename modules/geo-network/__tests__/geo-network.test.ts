@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { alongPolyline, countByCategory, lineCollections, NO_CATEGORY, pointCollections, PointGrid, polylineLengths, weightBucket, type DenseNetwork } from '../index'
+import { alongPolyline, countByCategory, distanceToSegment, lineCollections, NO_CATEGORY, pointCollections, PointGrid, polylineLengths, SegmentGrid, weightBucket, type DenseNetwork } from '../index'
 
 // Four nodes on a line of longitude-spaced points, two categories of segments.
 const net: DenseNetwork = {
@@ -37,6 +37,19 @@ describe('geo-network', () => {
     expect(grid.nearest(0.012, 51, 0.005, 0.005)).toBe(1)
     expect(grid.nearest(0.012, 51, 0.005, 0.005, (i) => i !== 1)).toBe(-1)
     expect(grid.nearest(1, 52, 0.01, 0.01)).toBe(-1)
+  })
+
+  it('lists a segment in every cell its line crosses', () => {
+    const grid = new SegmentGrid(net)
+    expect([...grid.near(0.5, 51.5, 0.5, 51.5)]).toEqual([2])
+    expect([...grid.near(0.005, 51, 0.006, 51)].sort()).toEqual([0, 1, 2])
+    expect(grid.near(5, 55, 6, 56).size).toBe(0)
+  })
+
+  it('measures the distance to a segment, clamped to its ends', () => {
+    expect(distanceToSegment(5, 3, 0, 0, 10, 0)).toBe(3)
+    expect(distanceToSegment(-4, 3, 0, 0, 10, 0)).toBe(5)
+    expect(distanceToSegment(1, 1, 2, 2, 2, 2)).toBeCloseTo(Math.SQRT2)
   })
 
   it('interpolates along a polyline by length', () => {

@@ -20,6 +20,7 @@ import { JourneyPanel } from './journey-panel'
 import type { Endpoint } from './journey'
 import { OperatorsPanel } from './operators-panel'
 import { PRESETS } from './presets'
+import { SegmentCard, type SegmentPick } from './segment-card'
 import { StopCard } from './stop-card'
 import { UKT_CSS } from './styles'
 
@@ -56,6 +57,7 @@ function TransportMap() {
   const [globe, setGlobe] = useState(true)
   const hover = useRef<(h: NetworkHover | null) => void>(() => {})
   const [pickedStop, setPickedStop] = useState<Endpoint | null>(null)
+  const [segment, setSegment] = useState<SegmentPick | null>(null)
   const [from, setFrom] = useState<Endpoint | null>(null)
   const [to, setTo] = useState<Endpoint | null>(null)
   const [schema, setSchema] = useState<GraphSchema | null>(null)
@@ -126,7 +128,20 @@ function TransportMap() {
 
   const pickedId = picked.key !== null && t ? Number(picked.key) : null
   const pickedIsStop = pickedId !== null && Number.isInteger(pickedId) && pickedId < (t?.indexOf.length ?? 0) && t!.indexOf[pickedId] >= 0
-  const autoRoutes = (picked.from === 'map' || picked.from === 'search') && list.every((o) => o.id === 'stop-routes' || o.id === 'route')
+  const autoRoutes = (picked.from === 'map' || picked.from === 'search') && list.every((o) => o.id === 'stop-routes' || o.id === 'route' || o.id === 'segment')
+  const showSegment = segment !== null && !pickedIsStop
+
+  useEffect(() => {
+    if (picked.key !== null) setSegment(null)
+  }, [picked.key])
+
+  const pickSegment = (e: number) => {
+    if (!t) return
+    const net = t.network
+    const a = net.src[e], b = net.tgt[e]
+    overlays.pick(null)
+    setSegment({ from: t.ids[a], to: t.ids[b], mode: MODES[net.edgeCategory[e]].id, km: haversineKm(net.lng[a], net.lat[a], net.lng[b], net.lat[b]) })
+  }
 
   const toggle = (id: string) => setVisible((v) => (v.includes(id) ? v.filter((x) => x !== id) : [...v, id]))
   const plan = (which: 'from' | 'to', e: Endpoint) => {
@@ -138,8 +153,8 @@ function TransportMap() {
   const loading = !t && !err
   return (
     <div className="ukt-root">
-      <GeoMap basemap={basemap} projection={globe ? 'globe' : 'mercator'} center={[-25, 38]} zoom={1.5} insets={{ left: CONFIG.panelWidth, right: pickedIsStop ? CONFIG.cardWidth + 24 : 0 }} onReady={setMap}>
-        {t && <GeoNetwork network={t.network} categories={MODES} visible={visible} keyOf={(i) => String(t.ids[i])} yieldTo={['kit-nodes']} onHover={(h) => hover.current(h)} />}
+      <GeoMap basemap={basemap} projection={globe ? 'globe' : 'mercator'} center={[-25, 38]} zoom={1.5} insets={{ left: CONFIG.panelWidth, right: pickedIsStop || showSegment ? CONFIG.cardWidth + 24 : 0 }} onReady={setMap}>
+        {t && <GeoNetwork network={t.network} categories={MODES} visible={visible} keyOf={(i) => String(t.ids[i])} yieldTo={['kit-nodes']} onHover={(h) => hover.current(h)} onSegmentClick={pickSegment} />}
         {t && <GeoSurface nodes={overlayNodes} labels="overlay" radius={2.6} maxZoom={14} />}
         {t && <GeoPathFlow resolve={position} />}
         <PlaceLabels />
@@ -168,6 +183,7 @@ function TransportMap() {
         <StopCard db={db} id={pickedId} autoRoutes={autoRoutes} nameOf={atcoName} nameOfId={idName} onLoaded={setPickedStop}
           onClose={() => { overlays.pick(null); overlays.clear(); setPickedStop(null) }} onPlan={plan} />
       )}
+      {showSegment && segment && <SegmentCard db={db} segment={segment} nameOfId={idName} onClose={() => { overlays.clear(); setSegment(null) }} />}
     </div>
   )
 }
@@ -262,10 +278,22 @@ function HoverTip(p: { register: MutableRefObject<(h: NetworkHover | null) => vo
   p.register.current = setHit
   if (!hit) return null
   const { names } = p
-  const mode = MODES[p.transport.network.nodeCategory[hit.index]]
+  const net = p.transport.network
+  const name = (i: number) => (names ? names.name[i] || 'Unnamed stop' : 'Stop')
+  if (hit.kind === 'segment') {
+    const mode = MODES[net.edgeCategory[hit.index]]
+    const routes = net.weight?.[hit.index] ?? 1
+    return (
+      <div className="ukt-tip" style={{ left: hit.x + 14, top: hit.y + 14 }}>
+        <b>{name(net.src[hit.index])} → {name(net.tgt[hit.index])}</b>
+        <div className="tk-note">{mode.label} · {routes} route{routes === 1 ? '' : 's'}</div>
+      </div>
+    )
+  }
+  const mode = MODES[net.nodeCategory[hit.index]]
   return (
     <div className="ukt-tip" style={{ left: hit.x + 14, top: hit.y + 14 }}>
-      <b>{names ? names.name[hit.index] || 'Unnamed stop' : 'Stop'}</b>
+      <b>{name(hit.index)}</b>
       {names?.indicator[hit.index] ? <span className="tk-note"> · {names.indicator[hit.index]}</span> : null}
       <div className="tk-note">{[names?.locality[hit.index], mode?.label].filter(Boolean).join(' · ')}</div>
     </div>
@@ -295,6 +323,13 @@ function LoadingHud(p: { steps: LoadStep[] }) {
       ))}
     </div>
   )
+}
+
+function haversineKm(lng0: number, lat0: number, lng1: number, lat1: number): number {
+  const radians = Math.PI / 180
+  const dLat = (lat1 - lat0) * radians, dLng = (lng1 - lng0) * radians
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat0 * radians) * Math.cos(lat1 * radians) * Math.sin(dLng / 2) ** 2
+  return 2 * 6371 * Math.asin(Math.sqrt(h))
 }
 
 const sum = (m: Map<string, number>) => [...m.values()].reduce((a, b) => a + b, 0)

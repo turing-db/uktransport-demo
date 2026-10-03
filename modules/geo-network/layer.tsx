@@ -9,9 +9,10 @@ import { useEffect, useMemo, useRef } from 'react'
 import { useGeoMap, whenStyleReady } from '@kit/geo-map'
 import { compose, overlays as defaultStore, type NodeKey, type OverlayStore } from '@kit/overlay'
 import { useOverlays } from '@kit/ui'
-import { lineCollections, NO_CATEGORY, pointCollections, PointGrid, type DenseNetwork, type NetworkCategory } from './network'
+import { distanceToSegment, lineCollections, NO_CATEGORY, pointCollections, PointGrid, SegmentGrid, type DenseNetwork, type NetworkCategory } from './network'
 
-export interface NetworkHover { index: number; key: NodeKey; x: number; y: number }
+/** What is under the cursor: a node (with its overlay key) or a segment, by index. */
+export type NetworkHover = { kind: 'node'; index: number; key: NodeKey; x: number; y: number } | { kind: 'segment'; index: number; x: number; y: number }
 
 export interface GeoNetworkProps {
   network: DenseNetwork
@@ -32,6 +33,8 @@ export interface GeoNetworkProps {
   /** Opacity of the network while an overlay dims the rest (default 0.15). */
   dimTo?: number
   onHover?: (hit: NetworkHover | null) => void
+  /** A click on a segment (no node under the cursor); also makes segments hoverable. */
+  onSegmentClick?: (segment: number) => void
 }
 
 export function GeoNetwork(p: GeoNetworkProps) {
@@ -103,14 +106,24 @@ export function GeoNetwork(p: GeoNetworkProps) {
   }, [map, epoch, P, cats, visibleKey, factor])
 
   const keyOf = p.keyOf ?? ((i: number) => i)
-  const live = useRef({ keyOf, onHover: p.onHover, visibleKey })
-  live.current = { keyOf, onHover: p.onHover, visibleKey }
+  const live = useRef({ keyOf, onHover: p.onHover, onSegmentClick: p.onSegmentClick, visibleKey })
+  live.current = { keyOf, onHover: p.onHover, onSegmentClick: p.onSegmentClick, visibleKey }
+  const segments = useRef<{ network: DenseNetwork; grid: SegmentGrid } | null>(null)
+  const segmentsWanted = !!p.onSegmentClick
+
+  useEffect(() => {
+    if (!segmentsWanted) return
+    const timer = setTimeout(() => {
+      if (segments.current?.network !== p.network) segments.current = { network: p.network, grid: new SegmentGrid(p.network) }
+    }, 1500)
+    return () => clearTimeout(timer)
+  }, [p.network, segmentsWanted])
 
   useEffect(() => {
     if (!map) return
     const radius = p.pickRadius ?? 8
     const yieldTo = p.yieldTo ?? []
-    const hit = (e: MapMouseEvent): number => {
+    const nodeHit = (e: MapMouseEvent): number => {
       const shown = new Set(live.current.visibleKey.split('|'))
       const zoom = map.getZoom()
       const pickable = cats.map((c) => shown.has(c.id) && !!c.pointRadius && zoom >= (c.pointMinzoom ?? 0))
@@ -122,14 +135,44 @@ export function GeoNetwork(p: GeoNetworkProps) {
         return c !== NO_CATEGORY && pickable[c]
       })
     }
+    // The drawn segment nearest the cursor; within 2 px of the nearest, the one drawn on top wins.
+    const segmentHit = (e: MapMouseEvent): number => {
+      if (!live.current.onSegmentClick) return -1
+      const shown = new Set(live.current.visibleKey.split('|'))
+      const zoom = map.getZoom()
+      const drawn = cats.map((c) => shown.has(c.id) && zoom >= (c.minzoom ?? 0))
+      if (segments.current?.network !== p.network) segments.current = { network: p.network, grid: new SegmentGrid(p.network) }
+      const a = map.unproject([e.point.x - radius, e.point.y - radius])
+      const b = map.unproject([e.point.x + radius, e.point.y + radius])
+      const net = p.network
+      const hits: { e: number; d: number; c: number }[] = []
+      for (const s of segments.current.grid.near(Math.min(a.lng, b.lng), Math.min(a.lat, b.lat), Math.max(a.lng, b.lng), Math.max(a.lat, b.lat))) {
+        const c = net.edgeCategory[s]
+        if (!drawn[c]) continue
+        const from = map.project([net.lng[net.src[s]], net.lat[net.src[s]]])
+        const to = map.project([net.lng[net.tgt[s]], net.lat[net.tgt[s]]])
+        const d = distanceToSegment(e.point.x, e.point.y, from.x, from.y, to.x, to.y)
+        if (d <= radius) hits.push({ e: s, d, c })
+      }
+      if (!hits.length) return -1
+      const nearest = Math.min(...hits.map((h) => h.d))
+      return hits.filter((h) => h.d <= nearest + 2).sort((x, y) => y.c - x.c || x.d - y.d)[0].e
+    }
     const yielded = (e: MapMouseEvent) => {
       const layers = yieldTo.filter((l) => map.getLayer(l))
       return layers.length > 0 && map.queryRenderedFeatures(e.point, { layers }).length > 0
     }
+    const hitAt = (e: MapMouseEvent): NetworkHover | null => {
+      if (yielded(e)) return null
+      const i = nodeHit(e)
+      if (i >= 0) return { kind: 'node', index: i, key: live.current.keyOf(i), x: e.point.x, y: e.point.y }
+      const s = segmentHit(e)
+      return s >= 0 ? { kind: 'segment', index: s, x: e.point.x, y: e.point.y } : null
+    }
     const click = (e: MapMouseEvent) => {
-      if (yielded(e)) return
-      const i = hit(e)
-      if (i >= 0) store.pick(live.current.keyOf(i), 'map')
+      const h = hitAt(e)
+      if (h?.kind === 'node') store.pick(h.key, 'map')
+      else if (h?.kind === 'segment') live.current.onSegmentClick?.(h.index)
     }
     let frame = 0
     let last: MapMouseEvent | null = null
@@ -139,9 +182,9 @@ export function GeoNetwork(p: GeoNetworkProps) {
       frame = requestAnimationFrame(() => {
         frame = 0
         if (!last) return
-        const i = yielded(last) ? -1 : hit(last)
-        map.getCanvas().style.cursor = i >= 0 ? 'pointer' : ''
-        live.current.onHover?.(i >= 0 ? { index: i, key: live.current.keyOf(i), x: last.point.x, y: last.point.y } : null)
+        const h = hitAt(last)
+        map.getCanvas().style.cursor = h ? 'pointer' : ''
+        live.current.onHover?.(h)
       })
     }
     const out = () => { last = null; live.current.onHover?.(null) }

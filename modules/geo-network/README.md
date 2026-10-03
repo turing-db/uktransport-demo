@@ -26,6 +26,8 @@ category and weight bucket (1, 2, 3–4, 5–8, 9–16, 17+), so width follows w
 per segment. Toggling `visible` changes layout visibility and an overlay with `dimOthers` changes
 opacity; neither re-sends data to MapLibre's worker. A click picks the nearest drawn point within
 `pickRadius` px through `PointGrid` and publishes it with `store.pick(key, 'map')`, like `GeoSurface`.
+With `onSegmentClick`, a click with no point under it picks the nearest drawn segment through
+`SegmentGrid` (the one drawn on top when two are within 2 px), and `onHover` reports segments too.
 `GeoPathFlow` animates comets along every overlay `paths` entry, coloured by the path's tone.
 `PlaceLabels` restyles the basemap's place names (OpenMapTiles `place` layer) from the theme: cities
 bold and brightest, towns, then villages, with a solid halo, moved above every other layer. Mount it

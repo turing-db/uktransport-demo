@@ -6,21 +6,12 @@
 // much slower than the path, then change. Each leg lists that route's own
 // stops and timetable.
 
-import { chunked, orChain, seekNodes } from '@kit/cypher'
+import { chunked, seekNodes } from '@kit/cypher'
 import { findPath, type PathResult } from '@kit/paths'
 import type { TuringClient } from '@kit/tdb-client'
+import { loadServices, type Service } from './routes'
 
 export interface Endpoint { label: string; atco: string }
-
-export interface Service {
-  routeId: number
-  mode: string
-  line: string | null
-  operator: string | null
-  /** Name of the route's last stop. */
-  towards: string | null
-  services: number | null
-}
 
 export interface LegStop {
   id: number
@@ -177,36 +168,6 @@ async function loadRouteStops(db: TuringClient, routes: number[]) {
     }
   }
   for (const calls of out.values()) calls.sort((a, b) => a.sequence - b.sequence)
-  return out
-}
-
-async function loadServices(db: TuringClient, routeIds: number[]): Promise<Map<number, Service>> {
-  const out = new Map<number, Service>()
-  const destinations = new Map<number, string>()
-  for (const chunk of chunked(routeIds, 200)) {
-    const where = orChain('r.route_id', chunk)
-    const [routes, operators] = await Promise.all([
-      db.query(`MATCH (r:Route) WHERE ${where} RETURN r.route_id, r.mode, r.line, r.destination, r.services`),
-      db.query(`MATCH (o:Operator)-[:RUNS]->(r:Route) WHERE ${where} RETURN r.route_id, o.name`),
-    ])
-    const operator = new Map(operators.tuples().map((t) => [Number(t[0]), String(t[1])]))
-    for (const [id, mode, line, destination, services] of routes.tuples()) {
-      const routeId = Number(id)
-      out.set(routeId, { routeId, mode: String(mode ?? ''), line: line == null ? null : String(line), operator: operator.get(routeId) ?? null, towards: null, services: services == null ? null : Number(services) })
-      if (destination != null) destinations.set(routeId, String(destination))
-    }
-  }
-
-  const codes = [...new Set(destinations.values())]
-  const names = new Map<string, string>()
-  for (const chunk of chunked(codes, 200)) {
-    const r = await db.query(`MATCH (s:Stop) WHERE ${orChain('s.atco_code', chunk)} RETURN s.atco_code, s.name`)
-    r.tuples().forEach(([code, name]) => names.set(String(code), String(name)))
-  }
-  for (const [routeId, code] of destinations) {
-    const service = out.get(routeId)
-    if (service) service.towards = names.get(code) ?? code
-  }
   return out
 }
 

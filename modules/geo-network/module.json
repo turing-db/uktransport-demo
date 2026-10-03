@@ -5,7 +5,7 @@
   "category": "surface",
   "kind": "react",
   "status": "experimental",
-  "summary": "A country-sized network (hundreds of thousands of nodes and segments) drawn as one base layer of a GeoMap: built once from typed arrays into a few GeoJSON features per category, width by weight bucket, categories toggled by visibility, dimmed under overlays, picked through a grid index instead of per-node features; plus GeoPathFlow, comets travelling along every overlay path, and PlaceLabels, the basemap's place names restyled from the theme and lifted above the network so they stay readable.",
+  "summary": "A country-sized network (hundreds of thousands of nodes and segments) drawn as one base layer of a GeoMap: built once from typed arrays into a few GeoJSON features per category, width by weight bucket, categories toggled by visibility, dimmed under overlays, nodes and segments picked through grid indexes instead of per-feature hits; plus GeoPathFlow, comets travelling along every overlay path, and PlaceLabels, the basemap's place names restyled from the theme and lifted above the network so they stay readable.",
   "entry": "index.tsx",
   "requires": [
     "geo-map",
@@ -22,8 +22,7 @@
     "a route should visibly travel along the map (GeoPathFlow)"
   ],
   "avoidWhen": [
-    "a few thousand nodes: GeoSurface draws and labels them itself",
-    "per-segment clicks: segments are merged into one feature per category and bucket"
+    "a few thousand nodes: GeoSurface draws and labels them itself"
   ],
   "exports": [
     "GeoNetwork",
@@ -38,7 +37,9 @@
     "WEIGHT_BUCKETS",
     "NO_CATEGORY",
     "polylineLengths",
-    "alongPolyline"
+    "alongPolyline",
+    "SegmentGrid",
+    "distanceToSegment"
   ],
   "provenance": [
     {
@@ -48,5 +49,5 @@
       "what": "built for the UK public transport map (389k stops, 417k segments)"
     }
   ],
-  "verified": "unit tests (buckets, collections, grid picks, polyline interpolation); uktransport: 389,239 stops and 416,604 grouped segments drawn and picked on OpenFreeMap dark"
+  "verified": "unit tests (buckets, collections, node and segment grids, polyline interpolation); uktransport: 389,239 stops and 416,604 grouped segments drawn, stops and segments picked on OpenFreeMap dark"
 }
