@@ -1,8 +1,9 @@
 # UK public transport
 
-`fetch_uk_transport.py` downloads NaPTAN, the Bus Open Data Service GTFS timetables and the
-National Rail feeds into the CSV files under `data/`. `build_uk_transport_graph.py` turns them into
-the `uktransport` graph in a running TuringDB server through `LOAD PARQUET`.
+`fetch.py` downloads NaPTAN, the Bus Open Data Service GTFS timetables and the National Rail
+feeds into the CSV files under `data/`, then builds the `uktransport` graph from them in `.turing/`
+with the embedded TuringDB engine and `LOAD PARQUET`. It runs in a uv project pinned to
+`turingdb==3.0`; `--skip-fetch` builds the graph from the committed CSV files without downloading.
 
 The map app is a TypeScript page built from the
 [turingdb-ui-kit](https://github.com/turing-db/turingdb-ui-kit) on the turingdb-visualizer. It
@@ -11,8 +12,8 @@ journey planner (`shortestPath` over `minutes`), operator networks, prewritten q
 graph assistant.
 
 ```bash
-turingdb start -demon
-python3 build_uk_transport_graph.py
+uv run fetch.py
+uv run turingdb start -turing-dir .turing -load uktransport -demon
 
 git clone https://github.com/turing-db/turingdb-ui-kit ~/turingdb-ui-kit
 ./run.sh

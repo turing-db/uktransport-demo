@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-Fetch the UK public transport network from official open data and write it
-as CSV files: every stop, every operator, and every route with its stops.
+Fetch the UK public transport network from official open data, write it as
+CSV files: every stop, every operator, and every route with its stops, and
+build the uktransport TuringDB graph from them in a local .turing directory.
 
 Sources:
     National Rail Data Portal  rail stations, train operators, rail timetable
@@ -9,12 +10,15 @@ Sources:
     NaPTAN                     every public transport stop in Great Britain
 
 Usage:
-    python3 fetch_uk_transport.py [--credentials ~/uktransport.env] [--output data]
+    uv run fetch.py [--credentials ~/uktransport.env] [--data data] [--skip-fetch]
+                    [--turing-dir .turing] [--graph uktransport]
 
 The credentials file holds NRE_USERNAME and NRE_PASSWORD for the National Rail
 Data Portal, one KEY=VALUE per line. Environment variables take precedence.
+They are needed only to download the National Rail feeds missing from raw/.
+--skip-fetch builds the graph from the CSV files already in the data directory.
 
-Outputs, in the output directory:
+Outputs, in the data directory:
     stops.csv        NaPTAN stops, keyed by ATCO code
     stations.csv     National Rail stations, keyed by CRS code
     operators.csv    train operating companies and bus, coach and ferry operators
@@ -23,6 +27,24 @@ Outputs, in the output directory:
     transfers.csv    two-way links between stops: National Rail interchange links,
                      and a walk between any two served stops within 200 m
     raw/             the downloaded feeds, reused by the next run
+
+The CSV files become a nodes.parquet and edges.parquet pair in
+<turing-dir>/data/<graph>, which LOAD PARQUET imports through the embedded
+TuringDB engine as the graph <turing-dir>/graphs/<graph>, replacing any
+previous build. Serve it with:
+    uv run turingdb start -turing-dir .turing -load uktransport -demon
+
+Graph:
+    (:Stop)      NaPTAN and GTFS stops, keyed by atco_code
+    (:Station)   National Rail stations, keyed by crs
+    (:Operator)  train and bus operators, keyed by operator_id
+    (:Route)     one distinct stop sequence of a line, keyed by route_id
+
+    (Route)-[:CALLS_AT {sequence, arrival_minutes, departure_minutes}]->(Stop)
+    (Stop)-[:NEXT {route_id, mode, minutes}]->(Stop)   consecutive stops of a route
+    (Stop)-[:TRANSFER {mode, minutes, metres}]->(Stop)
+    (Operator)-[:RUNS]->(Route)
+    (Station)-[:AT]->(Stop)
 """
 
 import argparse
@@ -34,11 +56,16 @@ import json
 import math
 import os
 import re
+import shutil
 import sys
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ElementTree
 import zipfile
+
+import pyarrow
+import pyarrow.parquet
+from turingdb import TuringDB
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 USER_AGENT = "TuringDB-Sample/1.0"
@@ -101,6 +128,59 @@ STOP_STATUS = STOP_COLUMNS.index("status")
 STOP_LATITUDE = STOP_COLUMNS.index("latitude")
 STOP_LONGITUDE = STOP_COLUMNS.index("longitude")
 
+STRING = pyarrow.string()
+INTEGER = pyarrow.int64()
+DOUBLE = pyarrow.float64()
+
+STOP_PROPERTIES = {
+    "atco_code": STRING,
+    "naptan_code": STRING,
+    "name": STRING,
+    "indicator": STRING,
+    "locality": STRING,
+    "stop_type": STRING,
+    "latitude": DOUBLE,
+    "longitude": DOUBLE,
+    "status": STRING,
+}
+STATION_PROPERTIES = {
+    "crs": STRING,
+    "name": STRING,
+    "atco_code": STRING,
+    "tiploc": STRING,
+    "nlc": STRING,
+    "operator": STRING,
+    "latitude": DOUBLE,
+    "longitude": DOUBLE,
+    "interchange": INTEGER,
+    "change_minutes": INTEGER,
+}
+OPERATOR_PROPERTIES = {
+    "operator_id": STRING,
+    "name": STRING,
+    "noc": STRING,
+    "website": STRING,
+}
+ROUTE_PROPERTIES = {
+    "route_id": INTEGER,
+    "mode": STRING,
+    "operator_id": STRING,
+    "line": STRING,
+    "origin": STRING,
+    "destination": STRING,
+    "stops": INTEGER,
+    "services": INTEGER,
+}
+EDGE_PROPERTIES = {
+    "sequence": INTEGER,
+    "arrival_minutes": DOUBLE,
+    "departure_minutes": DOUBLE,
+    "route_id": INTEGER,
+    "mode": STRING,
+    "minutes": DOUBLE,
+    "metres": INTEGER,
+}
+
 
 @dataclasses.dataclass
 class Route:
@@ -153,12 +233,14 @@ def download(url, path, headers):
     print(f"  {os.path.getsize(path) / 1e6:.1f} MB")
 
 
-def download_feeds(raw_dir, credentials):
+def download_feeds(raw_dir, credentials_path):
     token = None
     for name, path in NRE_FEEDS.items():
         target = os.path.join(raw_dir, name)
         if not os.path.exists(target):
-            token = token or authenticate_nre(credentials)
+            if token is None:
+                token = authenticate_nre(load_credentials(credentials_path,
+                                                          ["NRE_USERNAME", "NRE_PASSWORD"]))
             download(NRE_BASE + path, target, {"X-Auth-Token": token})
 
     for name, url in (("bods_gtfs.zip", BODS_GTFS_URL), ("naptan.csv", NAPTAN_URL)):
@@ -587,17 +669,95 @@ def build_route_rows(routes):
     return route_rows, stop_rows
 
 
-def main():
-    parser = argparse.ArgumentParser(description=__doc__,
-                                     formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--credentials", default=os.path.expanduser("~/uktransport.env"))
-    parser.add_argument("--output", default=os.path.join(SCRIPT_DIR, "data"))
-    args = parser.parse_args()
+class GraphTable:
+    def __init__(self, key_columns, properties):
+        self.key_columns = key_columns
+        self.properties = properties
+        self.columns = {name: [] for name in key_columns + list(properties)}
 
-    raw_dir = os.path.join(args.output, "raw")
+    def add(self, keys, values):
+        for name, key in zip(self.key_columns, keys):
+            self.columns[name].append(key)
+        for name, value_type in self.properties.items():
+            self.columns[name].append(convert(values.get(name, ""), value_type))
+
+    def size(self):
+        return len(self.columns[self.key_columns[0]])
+
+    def write(self, path, key_types):
+        fields = [pyarrow.field(name, key_types[name], nullable=False) for name in self.key_columns]
+        fields += [pyarrow.field(name, value_type) for name, value_type in self.properties.items()]
+        table = pyarrow.table(self.columns, schema=pyarrow.schema(fields))
+        pyarrow.parquet.write_table(table, path)
+        print(f"Wrote {table.num_rows} rows to {path}")
+
+
+def convert(value, value_type):
+    if value == "":
+        return None
+    if value_type == INTEGER:
+        return int(value)
+    if value_type == DOUBLE:
+        return float(value)
+    return value
+
+
+def read_csv(directory, name):
+    with open(os.path.join(directory, name), newline="") as file:
+        return list(csv.DictReader(file))
+
+
+def add_nodes(nodes, ids, label, key, rows, properties):
+    for row in rows:
+        node_id = nodes.size()
+        ids[row[key]] = node_id
+        nodes.add([node_id, [label]], {name: row[name] for name in properties})
+
+
+def add_edge(edges, missing, edge_type, source, target, values):
+    if source is None or target is None:
+        missing[edge_type] = missing.get(edge_type, 0) + 1
+        return
+    edges.add([source, target, edge_type], values)
+
+
+def stop_minutes(row, first, second):
+    return row[first] if row[first] != "" else row[second]
+
+
+def add_route_edges(edges, missing, route_ids, route_modes, stop_ids, route_stops):
+    previous = None
+    for row in route_stops:
+        route = route_ids.get(row["route_id"])
+        stop = stop_ids.get(row["atco_code"])
+        add_edge(edges,
+                 missing,
+                 "CALLS_AT",
+                 route,
+                 stop,
+                 {name: row[name] for name in ("sequence", "arrival_minutes", "departure_minutes")})
+
+        is_same_route = previous is not None and previous["route_id"] == row["route_id"]
+        if is_same_route:
+            departure = stop_minutes(previous, "departure_minutes", "arrival_minutes")
+            arrival = stop_minutes(row, "arrival_minutes", "departure_minutes")
+            has_times = departure != "" and arrival != ""
+            minutes = f"{float(arrival) - float(departure):g}" if has_times else ""
+            add_edge(edges,
+                     missing,
+                     "NEXT",
+                     stop_ids.get(previous["atco_code"]),
+                     stop,
+                     {"route_id": row["route_id"],
+                      "mode": route_modes.get(row["route_id"], ""),
+                      "minutes": minutes})
+        previous = row
+
+
+def fetch_csv_files(credentials_path, output):
+    raw_dir = os.path.join(output, "raw")
     os.makedirs(raw_dir, exist_ok=True)
-    credentials = load_credentials(args.credentials, ["NRE_USERNAME", "NRE_PASSWORD"])
-    download_feeds(raw_dir, credentials)
+    download_feeds(raw_dir, credentials_path)
 
     naptan = read_naptan(os.path.join(raw_dir, "naptan.csv"))
     routes = {}
@@ -605,7 +765,7 @@ def main():
     with zipfile.ZipFile(os.path.join(raw_dir, "nre_timetable.zip")) as archive:
         msn = read_master_station_names(archive)
         principal, station_stops = map_stations_to_naptan(msn, naptan)
-        write_csv(os.path.join(args.output, "stations.csv"),
+        write_csv(os.path.join(output, "stations.csv"),
                   ["crs", "name", "atco_code", "tiploc", "nlc", "operator", "latitude",
                    "longitude", "interchange", "change_minutes"],
                   read_stations(os.path.join(raw_dir, "nre_stations.xml"),
@@ -617,7 +777,7 @@ def main():
     with zipfile.ZipFile(os.path.join(raw_dir, "bods_gtfs.zip")) as archive:
         operators = read_train_operators(os.path.join(raw_dir, "nre_tocs.xml"))
         operators += read_gtfs_operators(archive)
-        write_csv(os.path.join(args.output, "operators.csv"),
+        write_csv(os.path.join(output, "operators.csv"),
                   ["operator_id", "name", "noc", "website"],
                   operators)
 
@@ -627,23 +787,108 @@ def main():
         stops = [row for atco_code, row in naptan.items()
                  if row[STOP_STATUS] == "active" or atco_code in served]
         stops += read_gtfs_stops(archive, served - naptan.keys())
-        write_csv(os.path.join(args.output, "stops.csv"), STOP_COLUMNS, stops)
+        write_csv(os.path.join(output, "stops.csv"), STOP_COLUMNS, stops)
 
     coordinates = {row[0]: (float(row[STOP_LATITUDE]), float(row[STOP_LONGITUDE]))
                    for row in stops
                    if row[0] in served and row[STOP_LATITUDE] and row[STOP_LONGITUDE]}
-    write_csv(os.path.join(args.output, "transfers.csv"),
+    write_csv(os.path.join(output, "transfers.csv"),
               ["atco_code1", "atco_code2", "mode", "minutes", "metres"],
               build_transfer_rows(rail_links, coordinates))
 
     route_rows, stop_rows = build_route_rows(routes)
-    write_csv(os.path.join(args.output, "routes.csv"),
+    write_csv(os.path.join(output, "routes.csv"),
               ["route_id", "mode", "operator_id", "line", "origin", "destination",
                "stops", "services"],
               route_rows)
-    write_csv(os.path.join(args.output, "route_stops.csv"),
+    write_csv(os.path.join(output, "route_stops.csv"),
               ["route_id", "sequence", "atco_code", "arrival_minutes", "departure_minutes"],
               stop_rows)
+
+
+
+def build_graph(data_dir, turing_dir, graph):
+    node_properties = {**STOP_PROPERTIES, **STATION_PROPERTIES,
+                       **OPERATOR_PROPERTIES, **ROUTE_PROPERTIES}
+    nodes = GraphTable(["__id", "__labels"], node_properties)
+    stop_ids = {}
+    station_ids = {}
+    operator_ids = {}
+    route_ids = {}
+
+    stations = read_csv(data_dir, "stations.csv")
+    routes = read_csv(data_dir, "routes.csv")
+    add_nodes(nodes, stop_ids, "Stop", "atco_code",
+              read_csv(data_dir, "stops.csv"), STOP_PROPERTIES)
+    add_nodes(nodes, station_ids, "Station", "crs", stations, STATION_PROPERTIES)
+    add_nodes(nodes, operator_ids, "Operator", "operator_id",
+              read_csv(data_dir, "operators.csv"), OPERATOR_PROPERTIES)
+    add_nodes(nodes, route_ids, "Route", "route_id", routes, ROUTE_PROPERTIES)
+
+    edges = GraphTable(["__source", "__target", "__type"], EDGE_PROPERTIES)
+    missing = {}
+    route_modes = {row["route_id"]: row["mode"] for row in routes}
+    add_route_edges(edges,
+                    missing,
+                    route_ids,
+                    route_modes,
+                    stop_ids,
+                    read_csv(data_dir, "route_stops.csv"))
+
+    for row in read_csv(data_dir, "transfers.csv"):
+        add_edge(edges, missing, "TRANSFER",
+                 stop_ids.get(row["atco_code1"]),
+                 stop_ids.get(row["atco_code2"]),
+                 row)
+
+    for row in routes:
+        add_edge(edges, missing, "RUNS",
+                 operator_ids.get(row["operator_id"]),
+                 route_ids[row["route_id"]],
+                 {})
+
+    for row in stations:
+        if row["atco_code"]:
+            add_edge(edges, missing, "AT",
+                     station_ids[row["crs"]],
+                     stop_ids.get(row["atco_code"]),
+                     {})
+
+    for edge_type, count in sorted(missing.items()):
+        print(f"Skipped {count} {edge_type} edges with an end missing from the CSV files")
+
+    parquet_dir = os.path.join(turing_dir, "data", graph)
+    os.makedirs(parquet_dir, exist_ok=True)
+    nodes.write(os.path.join(parquet_dir, "nodes.parquet"),
+                {"__id": INTEGER, "__labels": pyarrow.list_(STRING)})
+    edges.write(os.path.join(parquet_dir, "edges.parquet"),
+                {"__source": INTEGER, "__target": INTEGER, "__type": STRING})
+
+    # LOAD PARQUET over an existing graph leaves it unreadable, so start afresh.
+    shutil.rmtree(os.path.join(turing_dir, "graphs", graph), ignore_errors=True)
+
+    print(f"Loading graph {graph} into {turing_dir}")
+    client = TuringDB(type="embedded", data_dir=turing_dir)
+    client.query(f"LOAD PARQUET '{graph}' AS {graph}")
+    client.set_graph(graph)
+    node_count = client.query("MATCH (n) RETURN count(n)").iloc[0, 0]
+    edge_count = client.query("MATCH ()-[r]->() RETURN count(r)").iloc[0, 0]
+    print(f"Graph {graph}: {node_count} nodes, {edge_count} edges")
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--credentials", default=os.path.expanduser("~/uktransport.env"))
+    parser.add_argument("--data", default=os.path.join(SCRIPT_DIR, "data"))
+    parser.add_argument("--skip-fetch", action="store_true")
+    parser.add_argument("--turing-dir", default=os.path.join(SCRIPT_DIR, ".turing"))
+    parser.add_argument("--graph", default="uktransport")
+    args = parser.parse_args()
+
+    if not args.skip_fetch:
+        fetch_csv_files(args.credentials, args.data)
+    build_graph(args.data, os.path.abspath(args.turing_dir), args.graph)
 
 
 if __name__ == "__main__":
