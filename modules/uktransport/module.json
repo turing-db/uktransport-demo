@@ -1,0 +1,12 @@
+{
+  "id": "uktransport",
+  "title": "UK public transport (demo module)",
+  "version": "0.1.0",
+  "category": "panel",
+  "kind": "host",
+  "status": "experimental",
+  "summary": "This demo's page: the UK public transport network on a map, with journeys, operators, prewritten queries and the graph assistant.",
+  "entry": "module.tsx",
+  "register": "module.tsx",
+  "requires": ["cypher", "tdb-client", "overlay", "theme", "ui", "geo-map", "geo-network", "paths", "presets", "preset-panel", "assistant"]
+}

@@ -1,0 +1,7 @@
+{
+  "name": "uktransport",
+  "graph": "uktransport",
+  "modules": ["cypher", "tdb-client", "graph-algo", "overlay", "theme", "ui", "presets", "preset-panel", "paths", "geo-map", "assistant"],
+  "local": ["modules/geo-network", "modules/uktransport"],
+  "ports": { "ui": 8099, "api": 6666 }
+}

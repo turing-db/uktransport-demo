@@ -1,0 +1,24 @@
+{
+  "id": "geo-network",
+  "title": "Dense network layer for the geo map",
+  "version": "0.1.0",
+  "category": "surface",
+  "kind": "react",
+  "status": "experimental",
+  "summary": "A country-sized network (hundreds of thousands of nodes and segments) drawn as one base layer of a GeoMap: built once from typed arrays into a few GeoJSON features per category, width by weight bucket, categories toggled by visibility, dimmed under overlays, picked through a grid index instead of per-node features; plus GeoPathFlow, comets travelling along every overlay path.",
+  "entry": "index.tsx",
+  "requires": ["geo-map", "overlay", "theme", "ui"],
+  "npm": { "maplibre-gl": "^5.24.0" },
+  "useWhen": ["the base network is too big for GeoSurface (more than ~10k nodes or segments): a national transport, road, grid or telecom network", "segments fall into categories to toggle (mode, voltage, operator) and carry a weight (routes, capacity)", "a route should visibly travel along the map (GeoPathFlow)"],
+  "avoidWhen": ["a few thousand nodes: GeoSurface draws and labels them itself", "per-segment clicks: segments are merged into one feature per category and bucket"],
+  "exports": ["GeoNetwork", "GeoPathFlow", "PointGrid", "lineCollections", "pointCollections", "countByCategory", "weightBucket", "bucketWidth", "WEIGHT_BUCKETS", "NO_CATEGORY", "polylineLengths", "alongPolyline"],
+  "provenance": [
+    {
+      "repo": "turing-db/turingdb",
+      "ref": "be2bf8c4f",
+      "path": "samples/uktransport/modules/geo-network",
+      "what": "built for the UK public transport map (389k stops, 417k segments)"
+    }
+  ],
+  "verified": "unit tests (buckets, collections, grid picks, polyline interpolation); uktransport: 389,239 stops and 416,604 grouped segments drawn and picked on OpenFreeMap dark"
+}
