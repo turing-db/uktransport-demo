@@ -138,12 +138,14 @@ export async function loadStations(db: TuringClient): Promise<Station[]> {
 
 /** Up to `limit` stops whose name or locality contains every word typed:
  *  stops of the highest-ranked mode first (rail before bus), then names that
- *  start with the text, then shorter names. */
-export function searchStops(names: Names, t: Transport, text: string, limit = 8): number[] {
+ *  start with the text, then shorter names. `served` keeps only the stops a
+ *  route calls at, the ones a journey can start or end at. */
+export function searchStops(names: Names, t: Transport, text: string, limit = 8, served = false): number[] {
   const words = text.toLowerCase().split(/\s+/).filter(Boolean)
   if (!words.length) return []
   const matches: number[] = []
   for (let i = 0; i < names.search.length && matches.length < 2000; i++) {
+    if (served && t.network.nodeCategory[i] === NO_CATEGORY) continue
     const s = names.search[i]
     if (words.every((w) => s.includes(w))) matches.push(i)
   }

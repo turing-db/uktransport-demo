@@ -172,7 +172,7 @@ function TransportMap() {
         {t && <StopSearch names={names} transport={t} map={map} />}
         <TabPanels value={tab} panels={[
           { id: 'network', body: <NetworkTab t={t} counts={counts} steps={steps} visible={visible} toggle={toggle} setVisible={setVisible} basemap={basemap} setBasemap={setBasemap} globe={globe} setGlobe={setGlobe} /> },
-          { id: 'journey', body: <JourneyPanel db={db} stations={stations} picked={pickedStop} from={from} to={to} onFrom={setFrom} onTo={setTo} /> },
+          { id: 'journey', body: <JourneyPanel db={db} stations={stations} names={names} transport={t} picked={pickedStop} from={from} to={to} onFrom={setFrom} onTo={setTo} /> },
           { id: 'explore', body: <PresetPanel presets={PRESETS} client={db} caps={caps} freeText /> },
           { id: 'operators', body: <OperatorsPanel db={db} /> },
           { id: 'ask', body: <AssistantPanel agent={agent} settings={settings} suggestions={CONFIG.suggestions} /> },

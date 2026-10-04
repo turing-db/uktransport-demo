@@ -12,7 +12,7 @@ export const CONFIG = {
     '(:Stop) is a stop or platform keyed by atco_code with latitude/longitude; (:Station) a National Rail station keyed by crs, (Station)-[:AT]->(Stop); ' +
     '(:Route) one distinct stop sequence of a line with mode (bus, coach, rail, metro, tram, ferry, aerial_lift), line, origin/destination atco codes, stops and services; ' +
     '(Operator)-[:RUNS]->(Route), (Route)-[:CALLS_AT {sequence, arrival_minutes, departure_minutes}]->(Stop); ' +
-    '(Stop)-[:NEXT {route_id, mode, minutes}]->(Stop) joins consecutive stops of a route; (Stop)-[:TRANSFER {mode, minutes, metres}]->(Stop) is a walk or interchange. ' +
+    '(Stop)-[:NEXT {route_id, mode, minutes}]->(Stop) joins consecutive stops of a route; (Stop)-[:TRANSFER {mode, minutes, metres}]->(Stop) is a walk or interchange, stored once in each direction. ' +
     'Use shortestPath(a, b, minutes, dist, path) between Stop nodes for the fastest chain of hops.',
   suggestions: ['Which stops are served by the most routes?', 'How long is the fastest journey from Penzance to Thurso?', 'Which operators run trams?'],
 }

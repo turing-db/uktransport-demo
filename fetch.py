@@ -42,7 +42,7 @@ Graph:
 
     (Route)-[:CALLS_AT {sequence, arrival_minutes, departure_minutes}]->(Stop)
     (Stop)-[:NEXT {route_id, mode, minutes}]->(Stop)   consecutive stops of a route
-    (Stop)-[:TRANSFER {mode, minutes, metres}]->(Stop)
+    (Stop)-[:TRANSFER {mode, minutes, metres}]->(Stop)   a walk or interchange, both ways
     (Operator)-[:RUNS]->(Route)
     (Station)-[:AT]->(Stop)
 """
@@ -835,11 +835,13 @@ def build_graph(data_dir, turing_dir, graph):
                     stop_ids,
                     read_csv(data_dir, "route_stops.csv"))
 
+    # Each row is a two-way link but shortestPath only walks an edge forwards,
+    # so the graph stores it both ways.
     for row in read_csv(data_dir, "transfers.csv"):
-        add_edge(edges, missing, "TRANSFER",
-                 stop_ids.get(row["atco_code1"]),
-                 stop_ids.get(row["atco_code2"]),
-                 row)
+        first = stop_ids.get(row["atco_code1"])
+        second = stop_ids.get(row["atco_code2"])
+        add_edge(edges, missing, "TRANSFER", first, second, row)
+        add_edge(edges, missing, "TRANSFER", second, first, row)
 
     for row in routes:
         add_edge(edges, missing, "RUNS",

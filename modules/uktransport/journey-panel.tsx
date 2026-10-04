@@ -1,14 +1,22 @@
-import { useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
+import { seekNodes } from '@kit/cypher'
+import { NO_CATEGORY } from '@kit/geo-network'
 import { overlays, type Overlay, type OverlayEdge } from '@kit/overlay'
 import type { TuringClient } from '@kit/tdb-client'
 import { Button, Chip, CypherBlock, ErrorCard, Field, Honesty, Note, Section } from '@kit/ui'
-import { modeColor, modeLabel, SAMPLE_JOURNEYS } from './config'
-import type { Station } from './data'
+import { MODES, modeColor, modeLabel, SAMPLE_JOURNEYS } from './config'
+import { searchStops, type Names, type Station, type Transport } from './data'
 import { formatMinutes, planJourney, type Endpoint, type Journey, type Leg, type LegStop } from './journey'
 
-const STATION_LIST = 'ukt-stations'
+/** A choice offered while typing an endpoint: a National Rail station, or any
+ *  stop a route calls at (Underground, tram, bus...), whose ATCO code is only
+ *  fetched once chosen. */
+interface Suggestion { key: string; name: string; sub: string; color: string; endpoint: () => Promise<Endpoint> }
 
-export function JourneyPanel(p: { db: TuringClient; stations: Station[]; picked: Endpoint | null; from: Endpoint | null; to: Endpoint | null; onFrom: (e: Endpoint | null) => void; onTo: (e: Endpoint | null) => void }) {
+const SUGGESTIONS = 8
+const RAIL_SUGGESTIONS = 3
+
+export function JourneyPanel(p: { db: TuringClient; stations: Station[]; names: Names | null; transport: Transport | null; picked: Endpoint | null; from: Endpoint | null; to: Endpoint | null; onFrom: (e: Endpoint | null) => void; onTo: (e: Endpoint | null) => void }) {
   const [journey, setJourney] = useState<Journey | null>(null)
   const [err, setErr] = useState<unknown>(null)
   const [busy, setBusy] = useState(false)
@@ -17,6 +25,43 @@ export function JourneyPanel(p: { db: TuringClient; stations: Station[]; picked:
     const s = byName.get(name.trim().toLowerCase())
     return s ? { label: s.name, atco: s.atco } : null
   }
+  const suggest = useCallback((text: string): Suggestion[] => {
+    const words = text.toLowerCase().split(/\s+/).filter(Boolean)
+    if (text.trim().length < 2) return []
+    const first = words[0]
+    const rail = p.stations
+      .filter((s) => words.every((w) => s.name.toLowerCase().includes(w)))
+      .sort((x, y) => Number(y.name.toLowerCase().startsWith(first)) - Number(x.name.toLowerCase().startsWith(first)) || x.name.length - y.name.length)
+      .slice(0, RAIL_SUGGESTIONS)
+    const out: Suggestion[] = rail.map((s) => ({
+      key: `crs-${s.crs}`, name: s.name, sub: `National Rail · ${s.crs}`, color: modeColor('rail'),
+      endpoint: async () => ({ label: s.name, atco: s.atco }),
+    }))
+    const { names, transport } = p
+    if (!names || !transport) return out
+    const taken = new Set(rail.map((s) => s.id))
+    // The platforms of a station share its name, locality and mode: offer one,
+    // the router walks the TRANSFER links to the others.
+    const seen = new Set<string>()
+    for (const i of searchStops(names, transport, text, 10 * SUGGESTIONS, true)) {
+      const id = transport.ids[i]
+      if (taken.has(id) || out.length >= SUGGESTIONS) continue
+      const name = names.name[i] || 'Unnamed stop', locality = names.locality[i], indicator = names.indicator[i]
+      const c = transport.network.nodeCategory[i]
+      const place = `${name}|${indicator}|${locality}|${c}`
+      if (seen.has(place)) continue
+      seen.add(place)
+      out.push({
+        key: `stop-${id}`, name: indicator ? `${name} · ${indicator}` : name, sub: locality,
+        color: c === NO_CATEGORY ? 'var(--tk-text-faint)' : MODES[c].color,
+        endpoint: async () => {
+          const r = await p.db.query(`MATCH (s:Stop) WHERE ${seekNodes('s', [id])} RETURN s.atco_code`)
+          return { label: locality && !name.includes(locality) ? `${name}, ${locality}` : name, atco: String(r.column<string>(0)[0]) }
+        },
+      })
+    }
+    return out
+  }, [p.db, p.stations, p.names, p.transport])
 
   const go = async (from = p.from, to = p.to) => {
     if (!from || !to) return
@@ -52,9 +97,8 @@ export function JourneyPanel(p: { db: TuringClient; stations: Station[]; picked:
   return (
     <>
       <Section title="Plan a journey">
-        <datalist id={STATION_LIST}>{p.stations.map((s) => <option key={s.crs} value={s.name} />)}</datalist>
-        <EndpointField label="From" value={p.from} picked={p.picked} onChange={p.onFrom} resolve={station} />
-        <EndpointField label="To" value={p.to} picked={p.picked} onChange={p.onTo} resolve={station} />
+        <EndpointField label="From" value={p.from} picked={p.picked} onChange={p.onFrom} suggest={suggest} />
+        <EndpointField label="To" value={p.to} picked={p.picked} onChange={p.onTo} suggest={suggest} />
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 4 }}>
           <Button variant="primary" onClick={() => go()} disabled={busy || !p.from || !p.to || p.from.atco === p.to.atco}>{busy ? 'Routing…' : 'Find the fastest route'}</Button>
           <Button variant="ghost" title="Swap" onClick={() => { p.onFrom(p.to); p.onTo(p.from) }}>⇅</Button>
@@ -142,21 +186,47 @@ function formatOffset(m: number): string {
   return total < 60 ? `+${total} min` : `+${Math.floor(total / 60)} h ${String(total % 60).padStart(2, '0')}`
 }
 
-function EndpointField(p: { label: string; value: Endpoint | null; picked: Endpoint | null; onChange: (e: Endpoint | null) => void; resolve: (name: string) => Endpoint | null }) {
+function EndpointField(p: { label: string; value: Endpoint | null; picked: Endpoint | null; onChange: (e: Endpoint | null) => void; suggest: (text: string) => Suggestion[] }) {
   const [text, setText] = useState<string | null>(null)
+  const [err, setErr] = useState<string | null>(null)
   const shown = text ?? p.value?.label ?? ''
+  const hits = useMemo(() => (text === null ? [] : p.suggest(text)), [text, p.suggest])
+  const choose = async (hit: Suggestion) => {
+    setText(null)
+    setErr(null)
+    try {
+      p.onChange(await hit.endpoint())
+    } catch (e) {
+      setErr(`Could not look up ${hit.name}: ${e instanceof Error ? e.message : String(e)}`)
+    }
+  }
   return (
     <Field label={p.label}>
       <div style={{ display: 'flex', gap: 6 }}>
-        <input className="tk-input" list={STATION_LIST} placeholder="a National Rail station, or pick a stop on the map" value={shown}
-          onChange={(e) => {
-            setText(e.target.value)
-            const hit = p.resolve(e.target.value)
-            if (hit) { p.onChange(hit); setText(null) }
-          }}
-          onBlur={() => setText(null)} style={{ flex: 1, minWidth: 0 }} />
+        <div style={{ position: 'relative', flex: 1, minWidth: 0 }}>
+          <input className="tk-input" placeholder="a station or stop, or pick one on the map" value={shown} style={{ width: '100%' }}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && hits.length) choose(hits[0])
+              if (e.key === 'Escape') setText(null)
+            }}
+            onBlur={() => setText(null)} />
+          {hits.length > 0 && (
+            // mousedown would blur the input, closing the list before the click lands
+            <div className="ukt-hits" onMouseDown={(e) => e.preventDefault()}>
+              {hits.map((h) => (
+                <button key={h.key} type="button" onClick={() => choose(h)}>
+                  <i style={{ background: h.color }} />
+                  <span>{h.name}</span>
+                  {h.sub && <small>{h.sub}</small>}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
         <Button variant="ghost" disabled={!p.picked} title={p.picked ? `Use ${p.picked.label}` : 'Pick a stop on the map first'} onClick={() => { p.onChange(p.picked); setText(null) }}>◎</Button>
       </div>
+      {err && <div className="tk-note">{err}</div>}
     </Field>
   )
 }
