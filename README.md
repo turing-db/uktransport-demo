@@ -41,3 +41,19 @@ The run.sh script does:
 * Convert the data CSV files into a TuringDB graph
 * Launch turingdb in the background
 * Launch the Vite typescript app
+
+## Deploy to Railway
+
+```bash
+./deploy.sh
+```
+
+deploy.sh syncs `app/` as run.sh does, stages a minimal build context and uploads it with
+`railway up` to the linked service (`railway link` first on a new machine). The Dockerfile builds the
+front end and the graph from the CSV files, and runs TuringDB and the app's server in one container.
+Railway cannot build straight from GitHub, because `app/` is generated from a private repo and
+the CSV files are in git LFS. `./deploy.sh --docker` builds the same image locally.
+
+The service settings live in `.railway/railway.ts`; apply changes to them with `railway config apply`
+(it needs `npm install --no-save railway`). Set `ANTHROPIC_API_KEY` on the service to give the
+assistant a server key. Anyone who can open the page can then use that key.
