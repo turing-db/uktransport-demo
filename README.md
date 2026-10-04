@@ -30,8 +30,11 @@ Just run the run.sh script and it will take care of everything for you.
 
 ```bash
 ./run.sh
-# http://127.0.0.1:8099/?m=uktransport
+# http://<tailscale-ip>:8099/?m=uktransport when tailscale is up,
+# http://127.0.0.1:8099/?m=uktransport otherwise
 ```
+
+Pass `--local` to serve on 127.0.0.1 even when tailscale is up.
 
 The run.sh script does:
 * Check out the turingdb-ui-kit submodule
