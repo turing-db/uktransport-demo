@@ -1,5 +1,9 @@
 // Page-only styles; every colour is a kit token (--tk-*) or a mode colour passed inline.
 export const UKT_CSS = `
+/* No host side bar on this page (the kit's chrome policy has no switch for it):
+   hide its cell and give the content the whole width of the layout grid. */
+.grid:has(> .row-span-2 img[aria-label="turing-logo"]) { grid-template-columns: 1fr; }
+.row-span-2:has(img[aria-label="turing-logo"]) { display: none; }
 .ukt-root { position: relative; width: 100%; height: 100%; overflow: hidden; background: var(--tk-bg, #0E1014); }
 .ukt-logo { color: var(--tk-accent); font-size: 18px; text-shadow: 0 0 12px var(--tk-accent); }
 .ukt-tip { position: absolute; z-index: 30; pointer-events: none; max-width: 280px; padding: 6px 9px; border-radius: 6px;
