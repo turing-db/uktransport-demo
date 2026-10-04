@@ -3,7 +3,7 @@
 // prewritten queries and the assistant publishing overlays over it.
 
 import type { Map as MLMap } from 'maplibre-gl'
-import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MutableRefObject } from 'react'
 import { kitClientBase } from '@kit-host'
 import { AssistantPanel, captureSchema, useAssistantSettings, useGraphAgent, type GraphSchema } from '@kit/assistant'
 import type { Capabilities } from '@kit/cypher'
@@ -63,6 +63,10 @@ function TransportMap() {
   const [schema, setSchema] = useState<GraphSchema | null>(null)
   const picked = usePicked()
   const list = useOverlays()
+  const viewport = useViewport()
+  const phone = viewport.phone
+  const [sheetOpen, setSheetOpen] = useState(false)
+  const sheet = sheetOpen ? Math.round(viewport.height * CONFIG.sheetOpen) : CONFIG.sheetCollapsed
 
   useEffect(() => {
     let dead = false
@@ -83,7 +87,12 @@ function TransportMap() {
 
   useEffect(() => {
     if (!map || !t) return
-    map.flyTo({ center: CONFIG.home.center, zoom: CONFIG.home.zoom, duration: 5200, curve: 1.6, offset: [CONFIG.panelWidth / 2, 0], essential: true })
+    // Read once: the intro flight is not redone when the window resizes.
+    const narrow = matchMedia(CONFIG.phoneQuery).matches
+    map.flyTo({
+      center: CONFIG.home.center, zoom: narrow ? CONFIG.phoneHomeZoom : CONFIG.home.zoom, duration: 5200, curve: 1.6,
+      offset: narrow ? [0, -CONFIG.sheetCollapsed / 2] : [CONFIG.panelWidth / 2, 0], essential: true,
+    })
   }, [map, t])
 
   const settings = useAssistantSettings()
@@ -143,17 +152,28 @@ function TransportMap() {
     setSegment({ from: t.ids[a], to: t.ids[b], mode: MODES[net.edgeCategory[e]].id, km: haversineKm(net.lng[a], net.lat[a], net.lng[b], net.lat[b]) })
   }
 
+  // On a phone the cards sit above the sheet: lower it when one opens.
+  const card = pickedIsStop || showSegment
+  useEffect(() => {
+    if (phone && card) setSheetOpen(false)
+  }, [phone, card, picked.key, segment])
+
   const toggle = (id: string) => setVisible((v) => (v.includes(id) ? v.filter((x) => x !== id) : [...v, id]))
+  const openTab = (id: string) => {
+    setTab(id)
+    setSheetOpen(true)
+  }
   const plan = (which: 'from' | 'to', e: Endpoint) => {
     if (which === 'from') setFrom(e)
     else setTo(e)
-    setTab('journey')
+    openTab('journey')
   }
 
   const loading = !t && !err
   return (
-    <div className="ukt-root">
-      <GeoMap basemap={basemap} projection={globe ? 'globe' : 'mercator'} center={[-25, 38]} zoom={1.5} insets={{ left: CONFIG.panelWidth, right: pickedIsStop || showSegment ? CONFIG.cardWidth + 24 : 0 }} onReady={setMap}>
+    <div className="ukt-root" data-phone={phone} style={{ '--ukt-sheet': `${sheet}px` } as CSSProperties}>
+      <GeoMap basemap={basemap} projection={globe ? 'globe' : 'mercator'} center={[-25, 38]} zoom={1.5} onReady={setMap}
+        insets={phone ? { bottom: sheet } : { left: CONFIG.panelWidth, right: card ? CONFIG.cardWidth + 24 : 0 }}>
         {t && <GeoNetwork network={t.network} categories={MODES} visible={visible} keyOf={(i) => String(t.ids[i])} yieldTo={['kit-nodes']} onHover={(h) => hover.current(h)} onSegmentClick={pickSegment} />}
         {t && <GeoSurface nodes={overlayNodes} labels="overlay" radius={2.6} maxZoom={14} />}
         {t && <GeoPathFlow resolve={position} />}
@@ -165,11 +185,17 @@ function TransportMap() {
       {loading && <LoadingHud steps={steps} />}
 
       <Panel side="left" width={CONFIG.panelWidth} icon={<span className="ukt-logo">⬡</span>} title={CONFIG.title}
+        className={phone ? (sheetOpen ? 'ukt-sheet' : 'ukt-sheet ukt-sheet-low') : undefined} style={phone ? { width: 'auto', height: sheet } : undefined}
         subtitle={counts ? `${sum(counts.labels).toLocaleString()} nodes · ${sum(counts.edgeTypes).toLocaleString()} edges · ${CONFIG.graph}` : 'connecting to TuringDB…'}
-        tabs={<Tabs value={tab} onChange={setTab} tabs={TABS} />}
+        actions={phone && (
+          <button type="button" className="tk-btn" data-variant="ghost" aria-label={sheetOpen ? 'Lower the panel' : 'Raise the panel'} onClick={() => setSheetOpen(!sheetOpen)}>
+            {sheetOpen ? '▾' : '▴'}
+          </button>
+        )}
+        tabs={<Tabs value={tab} onChange={openTab} tabs={TABS} />}
         footer={<div className="tk-note">Live from TuringDB · NaPTAN, Bus Open Data Service and National Rail open data</div>}>
         {!!err && <ErrorCard error={err} />}
-        {t && <StopSearch names={names} transport={t} map={map} />}
+        {t && <StopSearch names={names} transport={t} map={map} onGo={() => phone && setSheetOpen(false)} />}
         <TabPanels value={tab} panels={[
           { id: 'network', body: <NetworkTab t={t} counts={counts} steps={steps} visible={visible} toggle={toggle} setVisible={setVisible} basemap={basemap} setBasemap={setBasemap} globe={globe} setGlobe={setGlobe} /> },
           { id: 'journey', body: <JourneyPanel db={db} stations={stations} names={names} transport={t} picked={pickedStop} from={from} to={to} onFrom={setFrom} onTo={setTo} /> },
@@ -242,7 +268,7 @@ function NetworkTab(p: { t: Transport | null; counts: Counts | null; steps: Load
   )
 }
 
-function StopSearch(p: { names: Names | null; transport: Transport; map: MLMap | null }) {
+function StopSearch(p: { names: Names | null; transport: Transport; map: MLMap | null; onGo?: () => void }) {
   const [text, setText] = useState('')
   const hits = useMemo(() => (p.names && text.trim().length >= 2 ? searchStops(p.names, p.transport, text) : []), [p.names, p.transport, text])
   const go = (i: number) => {
@@ -250,6 +276,7 @@ function StopSearch(p: { names: Names | null; transport: Transport; map: MLMap |
     setText('')
     p.map?.flyTo({ center: [p.transport.network.lng[i], p.transport.network.lat[i]], zoom: Math.max(p.map.getZoom(), 13), duration: 1600 })
     overlays.pick(String(id), 'search')
+    p.onGo?.()
   }
   return (
     <div className="ukt-search">
@@ -333,3 +360,15 @@ function haversineKm(lng0: number, lat0: number, lng1: number, lat1: number): nu
 }
 
 const sum = (m: Map<string, number>) => [...m.values()].reduce((a, b) => a + b, 0)
+
+/** Whether the window is phone-sized, and its height (for the sheet), kept up to date. */
+function useViewport(): { phone: boolean; height: number } {
+  const read = () => ({ phone: matchMedia(CONFIG.phoneQuery).matches, height: innerHeight })
+  const [v, setV] = useState(read)
+  useEffect(() => {
+    const on = () => setV(read())
+    addEventListener('resize', on)
+    return () => removeEventListener('resize', on)
+  }, [])
+  return v
+}

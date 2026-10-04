@@ -2,7 +2,7 @@
 export const UKT_CSS = `
 /* No host side bar on this page (the kit's chrome policy has no switch for it):
    hide its cell and give the content the whole width of the layout grid. */
-.grid:has(> .row-span-2 img[aria-label="turing-logo"]) { grid-template-columns: 1fr; }
+.grid:has(> .row-span-2 img[aria-label="turing-logo"]) { grid-template-columns: 1fr; height: 100dvh; }
 .row-span-2:has(img[aria-label="turing-logo"]) { display: none; }
 .ukt-root { position: relative; width: 100%; height: 100%; overflow: hidden; background: var(--tk-bg, #0E1014); }
 .ukt-logo { color: var(--tk-accent); font-size: 18px; text-shadow: 0 0 12px var(--tk-accent); }
@@ -53,4 +53,21 @@ export const UKT_CSS = `
 .ukt-stop small { color: var(--tk-text-mute); font-weight: 400; }
 .ukt-stop .tk-num { color: var(--tk-text-mute); font-weight: 400; }
 .ukt-more span { color: var(--tk-link); }
+
+/* Phones: a full-screen map under a bottom sheet (the panel, its height set by
+   the page) and cards across the top, kept clear of the sheet. */
+.ukt-sheet.tk-panel { top: auto; bottom: 0; left: 0; right: 0; border-width: 1px 0 0; border-radius: 14px 14px 0 0;
+  transition: height 0.25s ease; }
+.ukt-sheet .tk-panel-head { min-height: 0; padding: 10px 14px; }
+.ukt-sheet .tk-panel-foot { display: none; }
+.ukt-sheet-low .tk-panel-body { visibility: hidden; }
+.ukt-root[data-phone="true"] .maplibregl-ctrl-bottom-right,
+.ukt-root[data-phone="true"] .maplibregl-ctrl-bottom-left { bottom: var(--ukt-sheet); transition: bottom 0.25s ease; }
+@media (max-width: 640px), (max-height: 500px) {
+  .ukt-card { left: 8px; right: 8px; top: 8px; width: auto; max-height: calc(100% - var(--ukt-sheet) - 16px); }
+  .ukt-ribbon { display: none; }
+  .ukt-hud { transform: translate(-50%, calc(-50% - var(--ukt-sheet) / 2)); width: calc(100% - 32px); max-width: 360px; box-sizing: border-box; }
+  /* iOS Safari zooms into any field under 16px when it takes focus. */
+  .ukt-root input, .ukt-root textarea, .ukt-root select { font-size: 16px; }
+}
 `

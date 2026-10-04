@@ -6,8 +6,16 @@ export const CONFIG = {
   title: 'UK public transport',
   /** Where the map lands after the globe intro. */
   home: { center: [-3.4, 54.4] as [number, number], zoom: 5.25 },
+  /** The home zoom on a phone, where the whole of Great Britain must fit in ~390 px. */
+  phoneHomeZoom: 4.1,
   panelWidth: 400,
   cardWidth: 340,
+  /** On a phone (narrow, or held sideways) the panel becomes a bottom sheet over a full-screen map. */
+  phoneQuery: '(max-width: 640px), (max-height: 500px)',
+  /** The collapsed sheet shows the panel's header and tabs only. */
+  sheetCollapsed: 100,
+  /** The open sheet's share of the screen height. */
+  sheetOpen: 0.6,
   assistantNotes: 'The public transport network of Great Britain built from NaPTAN, the Bus Open Data Service GTFS timetables and National Rail. ' +
     '(:Stop) is a stop or platform keyed by atco_code with latitude/longitude; (:Station) a National Rail station keyed by crs, (Station)-[:AT]->(Stop); ' +
     '(:Route) one distinct stop sequence of a line with mode (bus, coach, rail, metro, tram, ferry, aerial_lift), line, origin/destination atco codes, stops and services; ' +
