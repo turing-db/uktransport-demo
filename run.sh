@@ -1,15 +1,19 @@
 #!/usr/bin/env bash
 # Run the UK public transport map app on localhost, or with --tailscale on
 # this machine's tailscale address. Clones the turingdb-ui-kit if it is
-# missing, and builds the graph in .turing/ from the committed CSV files with
-# fetch.py if it is not built yet. The ports come from kit.json; environment
-# overrides:
+# missing, builds the graph in .turing/ from the committed CSV files with
+# fetch.py if it is not built yet, and starts TuringDB in the background with
+# the graph loaded unless something already listens on the API port. TuringDB
+# keeps running after the app exits; stop it with
+#   uv run turingdb stop -turing-dir .turing
+# The ports come from kit.json; environment overrides:
 #   KIT            turingdb-ui-kit checkout (default ~/turingdb-ui-kit)
 #   KIT_REPO       where to clone it from (default the GitHub repo over ssh)
 #   UI_PORT        app port (default kit.json ports.ui)
 #   API_PORT       TuringDB port (default kit.json ports.api)
 #   SYNC=0         skip `kit sync` (app/ must already exist)
-#   BUILD=1        rebuild the graph even if it is already built
+#   BUILD=1        rebuild the graph even if it is already built, restarting
+#                  TuringDB on it
 
 set -euo pipefail
 
@@ -46,9 +50,24 @@ if [[ ! -f "$KIT/tools/kit.mjs" ]]; then
     exit 1
 fi
 
-if [[ "${BUILD:-0}" == "1" || ! -d "$DEMO_DIR/.turing/graphs/$GRAPH" ]]; then
+cd "$DEMO_DIR"
+
+if [[ "${BUILD:-0}" == "1" || ! -d .turing/graphs/"$GRAPH" ]]; then
+    # The build replaces the graph directory under any running server.
+    uv run turingdb stop -turing-dir .turing >/dev/null 2>&1 \
+        && echo "run.sh: stopped TuringDB to rebuild the graph"
     echo "run.sh: building graph $GRAPH in $DEMO_DIR/.turing"
-    (cd "$DEMO_DIR" && uv run fetch.py --skip-fetch --turing-dir .turing --graph "$GRAPH")
+    uv run fetch.py --skip-fetch --turing-dir .turing --graph "$GRAPH"
+fi
+
+if (echo > "/dev/tcp/127.0.0.1/$API_PORT") 2>/dev/null; then
+    echo "run.sh: TuringDB already listening on :$API_PORT"
+else
+    echo "run.sh: starting TuringDB on :$API_PORT with graph $GRAPH"
+    if ! log="$(uv run turingdb start -turing-dir .turing -p "$API_PORT" -load "$GRAPH" -demon 2>&1)"; then
+        echo "$log" >&2
+        exit 1
+    fi
 fi
 
 if [[ "${SYNC:-1}" != "0" || ! -d "$DEMO_DIR/app" ]]; then
@@ -56,6 +75,6 @@ if [[ "${SYNC:-1}" != "0" || ! -d "$DEMO_DIR/app" ]]; then
 fi
 
 echo "run.sh: http://$HOST:$UI_PORT/?m=uktransport  (TuringDB on :$API_PORT)"
-cd "$DEMO_DIR/app"
+cd app
 TURING_API_PORT="$API_PORT" TURING_FRONTEND_PORT="$UI_PORT" \
     exec npx vite --host "$HOST" --port "$UI_PORT" --strictPort
