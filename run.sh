@@ -1,14 +1,13 @@
 #!/usr/bin/env bash
 # Run the UK public transport map app on localhost, or with --tailscale on
-# this machine's tailscale address. Clones the turingdb-ui-kit if it is
-# missing, builds the graph in .turing/ from the committed CSV files with
-# fetch.py if it is not built yet, and starts TuringDB in the background with
-# the graph loaded unless something already listens on the API port. TuringDB
-# keeps running after the app exits; stop it with
+# this machine's tailscale address. Checks out the turingdb-ui-kit submodule
+# at its pinned commit, builds the graph in .turing/ from the committed CSV
+# files with fetch.py if it is not built yet, and starts TuringDB in the
+# background with the graph loaded unless something already listens on the
+# API port. TuringDB keeps running after the app exits; stop it with
 #   uv run turingdb stop -turing-dir .turing
 # The ports come from kit.json; environment overrides:
-#   KIT            turingdb-ui-kit checkout (default ~/turingdb-ui-kit)
-#   KIT_REPO       where to clone it from (default the GitHub repo over ssh)
+#   KIT            turingdb-ui-kit checkout to use instead of the submodule
 #   UI_PORT        app port (default kit.json ports.ui)
 #   API_PORT       TuringDB port (default kit.json ports.api)
 #   SYNC=0         skip `kit sync` (app/ must already exist)
@@ -18,8 +17,7 @@
 set -euo pipefail
 
 DEMO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-KIT="${KIT:-$HOME/turingdb-ui-kit}"
-KIT_REPO="${KIT_REPO:-git@github.com:turing-db/turingdb-ui-kit.git}"
+KIT="${KIT:-$DEMO_DIR/turingdb-ui-kit}"
 UI_PORT="${UI_PORT:-$(node -p "require('$DEMO_DIR/kit.json').ports.ui")}"
 API_PORT="${API_PORT:-$(node -p "require('$DEMO_DIR/kit.json').ports.api")}"
 GRAPH="$(node -p "require('$DEMO_DIR/kit.json').graph")"
@@ -41,9 +39,8 @@ for arg in "$@"; do
     esac
 done
 
-if [[ ! -e "$KIT" ]]; then
-    echo "run.sh: cloning turingdb-ui-kit into $KIT"
-    git clone "$KIT_REPO" "$KIT"
+if [[ "$KIT" == "$DEMO_DIR/turingdb-ui-kit" ]]; then
+    git -C "$DEMO_DIR" submodule update --init --recursive
 fi
 if [[ ! -f "$KIT/tools/kit.mjs" ]]; then
     echo "run.sh: $KIT is not a turingdb-ui-kit checkout (set KIT)" >&2

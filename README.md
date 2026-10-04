@@ -34,7 +34,7 @@ Just run the run.sh script and it will take care of everything for you.
 ```
 
 The run.sh script does:
-* Fetch the uikit
+* Check out the turingdb-ui-kit submodule
 * Convert the data CSV files into a TuringDB graph
 * Launch turingdb in the background
 * Launch the Vite typescript app
